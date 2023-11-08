@@ -9,6 +9,18 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 )
 
+type RepoStruct struct {
+	repos []*github.Repository
+	login string
+}
+
+type PullRequestStruct struct {
+	pr         *github.PullRequest
+	condition  string
+	mergeState bool
+	ciCDStatus string
+}
+
 func GetGitToken(envName string) string {
 	token := os.Getenv(envName)
 
@@ -19,7 +31,7 @@ func GetGitToken(envName string) string {
 	return token
 }
 
-func FetchPullRequests(status string, token string, repo string, withOrg bool, org string) ([]*github.PullRequest, error) {
+func FetchPullRequests(status string, token string, repo string, withOrg bool, org string) ([]PullRequestStruct, error) {
 	client := createClient(token)
 	ctx := context.Background()
 	user, err := getUser(ctx, client)
@@ -28,8 +40,9 @@ func FetchPullRequests(status string, token string, repo string, withOrg bool, o
 		return nil, err
 	}
 
-	var repos []*github.Repository
+	var repos []RepoStruct
 	var pullRequests []*github.PullRequest
+	var filteredPullRequests []PullRequestStruct
 
 	if repo != "all" {
 
@@ -45,17 +58,34 @@ func FetchPullRequests(status string, token string, repo string, withOrg bool, o
 			return nil, err
 		}
 
-		// TODO with orgs and repo name should be possible
+		for _, pr := range pullRequests {
+			if pr.User != nil && pr.User.Login != nil && *pr.User.Login == *user.Login {
+				filteredPullRequests = append(filteredPullRequests, PullRequestStruct{pr: pr, condition: "author", mergeState: false})
+			}
 
-		return pullRequests, nil
+			if pr.Assignee != nil && pr.Assignee.Login != nil && *pr.Assignee.Login == *user.Login {
+				filteredPullRequests = append(filteredPullRequests, PullRequestStruct{pr: pr, condition: "assignee", mergeState: false})
+			}
+
+			if pr.RequestedReviewers != nil {
+				for _, reviewer := range pr.RequestedReviewers {
+					if reviewer.Login != nil && *reviewer.Login == *user.Login {
+						filteredPullRequests = append(filteredPullRequests, PullRequestStruct{pr: pr, condition: "reviewer", mergeState: false})
+					}
+				}
+			}
+		}
+		// TODO: remove this return, because we can have a single repo with the org condition too
+		return filteredPullRequests, nil
 
 	}
 
 	if !withOrg {
-		repos, _, err = client.Repositories.List(ctx, *user.Login, &github.RepositoryListOptions{Affiliation: "owner,collaborator"})
+		clientRepos, _, err := client.Repositories.List(ctx, *user.Login, &github.RepositoryListOptions{Affiliation: "owner,collaborator"})
 		if err != nil {
 			return nil, err
 		}
+		repos = append(repos, RepoStruct{repos: clientRepos, login: *user.Login})
 	} else {
 		if org == "all" {
 			orgsLogin, err := getAllUserOrgsLogin(ctx, client, *user.Login)
@@ -68,7 +98,7 @@ func FetchPullRequests(status string, token string, repo string, withOrg bool, o
 					return nil, err
 				}
 
-				repos = append(repos, orgRepos...)
+				repos = append(repos, RepoStruct{repos: orgRepos, login: orgLogin})
 			}
 
 		} else {
@@ -76,7 +106,7 @@ func FetchPullRequests(status string, token string, repo string, withOrg bool, o
 			if err != nil {
 				return nil, err
 			}
-			repos = append(repos, orgRepos...)
+			repos = append(repos, RepoStruct{repos: orgRepos, login: org})
 		}
 		personalRepo, _, err := client.Repositories.List(ctx, *user.Login, &github.RepositoryListOptions{})
 
@@ -84,57 +114,82 @@ func FetchPullRequests(status string, token string, repo string, withOrg bool, o
 			return nil, err
 		}
 
-		repos = append(repos, personalRepo...)
+		repos = append(repos, RepoStruct{repos: personalRepo, login: *user.Login})
 	}
 
-	for _, repo := range repos {
-		repoPr, _, err := client.PullRequests.List(ctx, *user.Login, *repo.Name, &github.PullRequestListOptions{State: status})
-		if err != nil {
-			return nil, err
+	for _, repoItem := range repos {
+		for _, rep := range repoItem.repos {
+			repoPr, _, err := client.PullRequests.List(ctx, repoItem.login, *rep.Name, &github.PullRequestListOptions{State: status})
+			if err != nil {
+				return nil, err
+			}
+			pullRequests = append(pullRequests, repoPr...)
 		}
-		pullRequests = append(pullRequests, repoPr...)
+
 	}
 
-	return pullRequests, nil
+	for _, pr := range pullRequests {
+		if pr.User != nil && pr.User.Login != nil && *pr.User.Login == *user.Login {
+			commitStatus, _, err := client.Repositories.GetCombinedStatus(ctx, *pr.Base.Repo.Owner.Login, *pr.Base.Repo.Name, *pr.Head.SHA, nil)
+			if err != nil {
+				return nil, err
+			}
+			filteredPullRequests = append(filteredPullRequests, PullRequestStruct{pr: pr, condition: "author", mergeState: pr.GetMergeable(), ciCDStatus: commitStatus.GetState()})
+		}
+
+		if pr.Assignee != nil && pr.Assignee.Login != nil && *pr.Assignee.Login == *user.Login {
+			commitStatus, _, err := client.Repositories.GetCombinedStatus(ctx, *pr.Base.Repo.Owner.Login, *pr.Base.Repo.Name, *pr.Head.SHA, nil)
+			if err != nil {
+				return nil, err
+			}
+			filteredPullRequests = append(filteredPullRequests, PullRequestStruct{pr: pr, condition: "assignee", mergeState: pr.GetMergeable(), ciCDStatus: commitStatus.GetState()})
+		}
+
+		if pr.RequestedReviewers != nil {
+			for _, reviewer := range pr.RequestedReviewers {
+				if reviewer.Login != nil && *reviewer.Login == *user.Login {
+					commitStatus, _, err := client.Repositories.GetCombinedStatus(ctx, *pr.Base.Repo.Owner.Login, *pr.Base.Repo.Name, *pr.Head.SHA, nil)
+					if err != nil {
+						return nil, err
+					}
+					filteredPullRequests = append(filteredPullRequests, PullRequestStruct{pr: pr, condition: "reviewer", mergeState: pr.GetMergeable(), ciCDStatus: commitStatus.GetState()})
+				}
+			}
+		}
+
+	}
+
+	return filteredPullRequests, nil
 }
 
-func PrintPullRequests(pullRequests []*github.PullRequest) {
+func PrintPullRequests(pullRequests []PullRequestStruct) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{"PR Number", "Title", "URL", "Status", "MergeableState"})
-	for _, pr := range pullRequests {
-		if pr == nil {
-			continue // Skip this iteration if pr is nil
-		}
-
+	t.AppendHeader(table.Row{"PR Number", "Title", "PR Link", "Status", "PR Condition"})
+	for _, prItem := range pullRequests {
 		// Safely get the values, using defaults or placeholders if nil
 		number := 0
-		if pr.Number != nil {
-			number = *pr.Number
+		if prItem.pr.Number != nil {
+			number = *prItem.pr.Number
 		}
 
 		title := "N/A"
-		if pr.Title != nil {
-			title = *pr.Title
+		if prItem.pr.Title != nil {
+			title = *prItem.pr.Title
 		}
 
-		url := "N/A"
-		if pr.URL != nil {
-			url = *pr.URL
+		prLink := "N/A"
+		if prItem.pr.HTMLURL != nil {
+			prLink = *prItem.pr.HTMLURL
 		}
 
 		state := "N/A"
-		if pr.State != nil {
-			state = *pr.State
-		}
-
-		mergeableState := "N/A"
-		if pr.MergeableState != nil {
-			mergeableState = *pr.MergeableState
+		if prItem.pr.State != nil {
+			state = *prItem.pr.State
 		}
 
 		// Append the row with the safely extracted values
-		t.AppendRow(table.Row{number, title, url, state, mergeableState})
+		t.AppendRow(table.Row{number, title, prLink, state, prItem.condition})
 	}
 
 	t.AppendFooter(table.Row{"Total", len(pullRequests), "", "", ""})
@@ -173,6 +228,8 @@ func getUser(ctx context.Context, client *github.Client) (*github.User, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println("Rate remaining:", resp.Rate.Remaining)
 
 	if resp.Rate.Remaining < int(rateLimitPercentage*float64(resp.Rate.Limit)) {
 		fmt.Printf("You have %d requests remaining out of %d, stopping execution", resp.Rate.Remaining, resp.Rate.Limit)
