@@ -165,7 +165,7 @@ func FetchPullRequests(status string, token string, repo string, withOrg bool, o
 func PrintPullRequests(pullRequests []PullRequestStruct) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{"PR Number", "Title", "PR Link", "Status", "PR Condition"})
+	t.AppendHeader(table.Row{"PR Number", "Title", "PR Link", "Status", "PR Condition", "Mergeable", "CI/CD Status"})
 	for _, prItem := range pullRequests {
 		// Safely get the values, using defaults or placeholders if nil
 		number := 0
@@ -189,7 +189,7 @@ func PrintPullRequests(pullRequests []PullRequestStruct) {
 		}
 
 		// Append the row with the safely extracted values
-		t.AppendRow(table.Row{number, title, prLink, state, prItem.condition})
+		t.AppendRow(table.Row{number, title, prLink, state, prItem.condition, prItem.mergeState, prItem.ciCDStatus})
 	}
 
 	t.AppendFooter(table.Row{"Total", len(pullRequests), "", "", ""})
