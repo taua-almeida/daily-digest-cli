@@ -69,13 +69,13 @@ func runRootCmd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	pullRequests, err := internal.FetchPullRequests(receivedCommandArgs)
+	config, err := internal.ReadConfig("./config.toml")
+
 	if err != nil {
 		return err
 	}
 
-	config, err := internal.ReadConfig("./config.toml")
-
+	pullRequests, err := internal.FetchPullRequests(receivedCommandArgs, *config)
 	if err != nil {
 		return err
 	}

@@ -13,7 +13,7 @@ type repoError struct {
 	err      error
 }
 
-func FetchPullRequests(args *Args) ([]DetailedPullRequest, error) {
+func FetchPullRequests(args *Args, cmdConfig Config) ([]DetailedPullRequest, error) {
 	token, err := GetGitToken(args.EnvVar)
 	if err != nil {
 		return nil, err
@@ -21,7 +21,7 @@ func FetchPullRequests(args *Args) ([]DetailedPullRequest, error) {
 
 	client := createClient(token)
 	ctx := context.Background()
-	user, err := getUser(ctx, client)
+	user, err := getUser(ctx, client, cmdConfig.RateConfig)
 	if err != nil {
 		return nil, err
 	}
