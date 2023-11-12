@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -19,9 +18,4 @@ func GetGitToken(envName string) (string, error) {
 
 func createClient(token string) *github.Client {
 	return github.NewClient(nil).WithAuthToken(token)
-}
-
-func checkRepoExists(ctx context.Context, client *github.Client, owner string, repo string) error {
-	_, _, err := client.Repositories.Get(ctx, owner, repo)
-	return err
 }

@@ -14,107 +14,21 @@ func FetchPullRequests(args *Args) ([]DetailedPullRequest, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	client := createClient(token)
 	ctx := context.Background()
 	user, err := getUser(ctx, client)
-
 	if err != nil {
 		return nil, err
 	}
 
-	var reposCollection []RepositoryCollection
 	var pullRequests []*github.PullRequest
 	var filteredPullRequests []DetailedPullRequest
 
-	if !args.WithOrgs {
-		if args.RepoName != "all" {
-			// Checking if repo exists
-			err = checkRepoExists(ctx, client, *user.Login, args.RepoName)
-			if err != nil {
-				return nil, err
-			}
+	reposCollection, err := getReposCollection(ctx, client, args, user)
 
-			// Fetching pull requests from a single repo
-			pullRequests, _, err = client.PullRequests.List(ctx, *user.Login, args.RepoName, &github.PullRequestListOptions{State: args.Status})
-			if err != nil {
-				return nil, err
-			}
-			pullRequests = append(pullRequests, pullRequests...)
-
-		} else {
-			clientRepos, _, err := client.Repositories.List(ctx, *user.Login, &github.RepositoryListOptions{Affiliation: "owner,collaborator"})
-			if err != nil {
-				return nil, err
-			}
-			names := make([]string, 0, len(clientRepos))
-			for _, repo := range clientRepos {
-				names = append(names, *repo.Name)
-			}
-			reposCollection = append(reposCollection, RepositoryCollection{Repositories: names, Owner: *user.Login})
-		}
-
-	} else {
-		if args.Org == "all" {
-			orgsLogin, err := getAllUserOrgsLogin(ctx, client, *user.Login)
-			if err != nil {
-				return nil, err
-			}
-			for _, orgLogin := range orgsLogin {
-				orgRepos, _, err := client.Repositories.ListByOrg(ctx, orgLogin, &github.RepositoryListByOrgOptions{Type: "all"})
-				if err != nil {
-					return nil, err
-				}
-
-				names := make([]string, 0, len(orgRepos))
-				for _, repo := range orgRepos {
-					names = append(names, repo.GetName())
-				}
-				reposCollection = append(reposCollection, RepositoryCollection{Repositories: names, Owner: orgLogin})
-			}
-
-		} else {
-			orgRepos, resp, err := client.Repositories.ListByOrg(ctx, args.Org, &github.RepositoryListByOrgOptions{Type: "all"})
-			if resp != nil && resp.StatusCode == 404 {
-				return nil, fmt.Errorf("organization %s not found", args.Org)
-			}
-			if err != nil {
-				return nil, err
-			}
-			names := make([]string, 0, len(orgRepos))
-			for _, repo := range orgRepos {
-				names = append(names, *repo.Name)
-			}
-			reposCollection = append(reposCollection, RepositoryCollection{Repositories: names, Owner: args.Org})
-		}
-
-		if args.RepoName != "all" {
-			// Checking if repo exists
-			err = checkRepoExists(ctx, client, *user.Login, args.RepoName)
-			if err != nil {
-				return nil, err
-			}
-
-			// Fetching pull requests from a single repo
-			pullRequests, _, err = client.PullRequests.List(ctx, *user.Login, args.RepoName, &github.PullRequestListOptions{State: args.Status})
-			if err != nil {
-				return nil, err
-			}
-			pullRequests = append(pullRequests, pullRequests...)
-
-		} else {
-			personalRepo, _, err := client.Repositories.List(ctx, *user.Login, &github.RepositoryListOptions{Affiliation: "owner,collaborator"})
-
-			if err != nil {
-				return nil, err
-			}
-
-			names := make([]string, 0, len(personalRepo))
-			for _, repo := range personalRepo {
-				names = append(names, *repo.Name)
-			}
-			reposCollection = append(reposCollection, RepositoryCollection{Repositories: names, Owner: *user.Login})
-		}
-
+	if err != nil {
+		return nil, err
 	}
 
 	for _, repoItem := range reposCollection {

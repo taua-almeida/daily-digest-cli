@@ -12,6 +12,7 @@ func getUser(ctx context.Context, client *github.Client) (*github.User, error) {
 	rateLimitPercentage := 0.1
 
 	user, resp, err := client.Users.Get(ctx, "")
+
 	if err != nil {
 		return nil, err
 	}
