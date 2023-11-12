@@ -1,0 +1,11 @@
+title = "GH Daily Digest CLI"
+
+[print]
+style = ""
+
+[rate]
+type = "percentage"
+value = 10
+
+
+

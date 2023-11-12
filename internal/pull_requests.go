@@ -3,13 +3,17 @@ package internal
 import (
 	"context"
 	"fmt"
-	"time"
+	"sync"
 
 	"github.com/google/go-github/v56/github"
 )
 
+type repoError struct {
+	repoName string
+	err      error
+}
+
 func FetchPullRequests(args *Args) ([]DetailedPullRequest, error) {
-	start := time.Now()
 	token, err := GetGitToken(args.EnvVar)
 	if err != nil {
 		return nil, err
@@ -22,27 +26,59 @@ func FetchPullRequests(args *Args) ([]DetailedPullRequest, error) {
 		return nil, err
 	}
 
-	var pullRequests []*github.PullRequest
-	var filteredPullRequests []DetailedPullRequest
-
 	reposCollection, err := getReposCollection(ctx, client, args, user)
 
 	if err != nil {
 		return nil, err
 	}
 
+	var wg sync.WaitGroup
+	pullRequestsChan := make(chan []*github.PullRequest)
+	errChan := make(chan repoError)
+
 	for _, repoItem := range reposCollection {
+		owner := repoItem.Owner
 		for _, repName := range repoItem.Repositories {
-			repoPr, _, err := client.PullRequests.List(ctx, repoItem.Owner, repName, &github.PullRequestListOptions{State: args.Status})
-			if err != nil {
-				return nil, err
-			}
-			pullRequests = append(pullRequests, repoPr...)
+			wg.Add(1)
+			go func(repName string, owner string) {
+				defer wg.Done()
+				repoPr, _, err := client.PullRequests.List(ctx, owner, repName, &github.PullRequestListOptions{State: args.Status})
+				if err != nil {
+					fmt.Printf("Error fetching pull requests for repo %s: %v\n", repName, err)
+					errChan <- repoError{repoName: repName, err: err}
+					return
+				}
+				pullRequestsChan <- repoPr
+			}(repName, owner)
+
 		}
 
 	}
 
-	for _, pr := range pullRequests {
+	go func() {
+		wg.Wait()
+		close(pullRequestsChan)
+		close(errChan)
+	}()
+
+	var allPullRequests []*github.PullRequest
+	for pr := range pullRequestsChan {
+		allPullRequests = append(allPullRequests, pr...)
+	}
+
+	var hasError bool
+	for repoErr := range errChan {
+		fmt.Printf("Error in repository %s: %v\n", repoErr.repoName, repoErr.err)
+		hasError = true
+	}
+
+	if hasError {
+		return nil, fmt.Errorf("errors occurred while fetching pull requests")
+	}
+
+	var detailedPrs []DetailedPullRequest
+
+	for _, pr := range allPullRequests {
 		detailedPR := DetailedPullRequest{
 			Number:      pr.GetNumber(),
 			Title:       pr.GetTitle(),
@@ -86,13 +122,10 @@ func FetchPullRequests(args *Args) ([]DetailedPullRequest, error) {
 		}
 
 		if detailedPR.Condition != "" {
-			filteredPullRequests = append(filteredPullRequests, detailedPR)
+			detailedPrs = append(detailedPrs, detailedPR)
 		}
 
 	}
 
-	elapsed := time.Since(start)
-	fmt.Printf("Code block took %s\n", elapsed)
-
-	return filteredPullRequests, nil
+	return detailedPrs, nil
 }

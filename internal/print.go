@@ -6,7 +6,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 )
 
-func PrintPullRequests(detailedPullRequests []DetailedPullRequest) {
+func PrintPullRequests(detailedPullRequests []DetailedPullRequest, printConfig PrintStyle) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
 	t.AppendHeader(table.Row{"PR Number", "Title", "PR Link", "Status", "PR Condition", "Mergeable", "CI/CD Status"})
@@ -15,6 +15,25 @@ func PrintPullRequests(detailedPullRequests []DetailedPullRequest) {
 	}
 
 	t.AppendFooter(table.Row{"Total", len(detailedPullRequests), "", "", ""})
-	t.SetStyle(table.StyleColoredBright)
+	t.SetStyle(getStyle(printConfig.Style))
 	t.Render()
+}
+
+func getStyle(styleName string) table.Style {
+	switch styleName {
+	case "bold":
+		return table.StyleBold
+	case "colored_bright":
+		return table.StyleColoredBright
+	case "colored_dark":
+		return table.StyleColoredDark
+	case "double":
+		return table.StyleDouble
+	case "light":
+		return table.StyleLight
+	case "rounder":
+		return table.StyleRounded
+	default:
+		return table.StyleDefault
+	}
 }
